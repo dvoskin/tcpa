@@ -368,7 +368,7 @@ export async function getCallHistory(contactIds: string[], phone: string): Promi
       if (seenIds.has(row.id as string)) return;
       // Skip calls with no logged duration or too short to be real
       if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) return;
-      if ((row.Call_Duration_in_seconds as number) <= 5) return;
+      if ((row.Call_Duration_in_seconds as number) === 5) return;
       // Skip automation-generated follow-up calls and RingCentral auto-logged duplicates
       const subjectRaw = (row.Subject as string) ?? "";
       if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subjectRaw)) return;
