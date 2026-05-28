@@ -165,13 +165,22 @@ export async function findAllContactsByPhone(phone: string): Promise<ContactReco
     for (const c of raw.data ?? []) add(c, "Contact");
   }
 
-  // COQL for custom phone fields not covered by REST phone search
-  const customQ = `SELECT ${CONTACT_COQL_FIELDS} FROM Contacts WHERE Customer_phone_number = '${escaped}' OR Phone_Normalized = '${escaped}' LIMIT 200`;
-  for (const c of await coql(customQ)) add(c as Record<string, unknown>, "Contact");
+  // COQL for custom phone fields — split OR conditions into separate queries (COQL rejects OR)
+  const [byCustomPhone, byNormalized] = await Promise.all([
+    coql(`SELECT ${CONTACT_COQL_FIELDS} FROM Contacts WHERE Customer_phone_number = '${escaped}' LIMIT 200`),
+    coql(`SELECT ${CONTACT_COQL_FIELDS} FROM Contacts WHERE Phone_Normalized = '${escaped}' LIMIT 200`),
+  ]);
+  for (const c of [...byCustomPhone, ...byNormalized]) add(c as Record<string, unknown>, "Contact");
 
-  // Leads
-  const leadQ = `SELECT id, Full_Name, Email, Phone, Mobile, Lead_Source, Owner, Created_Time, Modified_Time, Data_Source FROM Leads WHERE Phone = '${escaped}' OR Mobile = '${escaped}' OR Phone = '${escaped164}' OR Mobile = '${escaped164}' LIMIT 200`;
-  for (const l of await coql(leadQ)) add(l as Record<string, unknown>, "Lead");
+  // Leads — split OR conditions into separate queries (COQL rejects OR)
+  const LEAD_FIELDS = "id, Full_Name, Email, Phone, Mobile, Lead_Source, Owner, Created_Time, Modified_Time, Data_Source";
+  const leadRows = (await Promise.all([
+    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Phone = '${escaped}' LIMIT 200`),
+    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Mobile = '${escaped}' LIMIT 200`),
+    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Phone = '${escaped164}' LIMIT 200`),
+    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Mobile = '${escaped164}' LIMIT 200`),
+  ])).flat();
+  for (const l of leadRows) add(l as Record<string, unknown>, "Lead");
 
   return all;
 }
