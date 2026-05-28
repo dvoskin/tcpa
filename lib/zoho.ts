@@ -363,8 +363,9 @@ export async function getCallHistory(contactId: string, phone: string): Promise<
   for (const r of await coql(qContact)) {
     const row = r as Record<string, unknown>;
     if (seenIds.has(row.id as string)) continue;
-    // Skip calls with no logged duration — these are system-generated placeholders
+    // Skip calls with no logged duration or too short to be real
     if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) continue;
+    if ((row.Call_Duration_in_seconds as number) <= 5) continue;
     // Skip automation-generated follow-up calls (subject contains Follow/FollowUp/FU)
     const subjectRaw = (row.Subject as string) ?? "";
     if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subjectRaw)) continue;
