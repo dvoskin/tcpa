@@ -111,7 +111,13 @@ const LEAD_SOURCE_TOOLTIPS: Record<string, string> = {
   "Website": "The lead came through the website with consent.",
   "Web Site": "The lead came through the website with consent.",
   "Website Lead Form": "The lead came through the website with consent.",
+  "SalesIQ": "The lead initiated a live chat on the website. This is treated as a website consent entry.",
 };
+
+function isSalesIQChat(note: NoteRecord): boolean {
+  const text = `${note.title ?? ""} ${note.content ?? ""}`.toLowerCase();
+  return /salesiq|sales\s*iq|live\s*chat|chat\s*transcript/.test(text);
+}
 
 function LeadSourceRow({ value }: { value?: string }) {
   if (!value) return null;
@@ -179,6 +185,8 @@ export default function ContactDetail({ phone }: { phone: string }) {
   );
 
   const { contact, allContacts = [], sms = [], calls = [], notes = [], deals = [], webform, formSubmissions = [] } = data;
+  const salesIQChats = notes.filter(isSalesIQChat);
+  const totalWebEntries = formSubmissions.length + salesIQChats.length;
 
   if (!contact) return (
     <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2 p-6">
@@ -208,16 +216,16 @@ export default function ContactDetail({ phone }: { phone: string }) {
     { id: "sms", label: "SMS", count: sms.length },
     { id: "calls", label: "Calls", count: calls.length },
     { id: "deals", label: "Transactions", count: deals.length },
-    { id: "webform", label: "Webform / Consent", count: formSubmissions.length > 0 ? formSubmissions.length : undefined },
+    { id: "webform", label: "Webform / Consent", count: totalWebEntries > 0 ? totalWebEntries : undefined },
     { id: "timeline", label: "Timeline", count: sms.length + calls.length + notes.length },
   ];
 
   // Build merged timeline
-  type TLItem = { ts: string; kind: "sms" | "call" | "note"; data: SmsRecord | CallRecord | NoteRecord };
+  type TLItem = { ts: string; kind: "sms" | "call" | "note" | "chat"; data: SmsRecord | CallRecord | NoteRecord };
   const timeline: TLItem[] = [
     ...sms.map((s) => ({ ts: s.createdTime, kind: "sms" as const, data: s })),
     ...calls.map((c) => ({ ts: c.startTime, kind: "call" as const, data: c })),
-    ...notes.map((n) => ({ ts: n.createdTime, kind: "note" as const, data: n })),
+    ...notes.map((n) => ({ ts: n.createdTime, kind: isSalesIQChat(n) ? "chat" as const : "note" as const, data: n })),
   ].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
 
   function exportRecord() {
@@ -272,8 +280,14 @@ export default function ContactDetail({ phone }: { phone: string }) {
       lines.push("");
     }
 
-    sep(`Web Form Submissions (${formSubmissions.length})`);
-    if (formSubmissions.length === 0) { lines.push("No form submissions."); }
+    sep(`Live Chat / Web Entries (${formSubmissions.length + salesIQChats.length})`);
+    for (const n of salesIQChats) {
+      lines.push(`[${fmtDate(n.createdTime)}] SalesIQ Live Chat — Website Consent`);
+      lines.push(`  ${n.title || "Chat"}`);
+      if (n.content) lines.push(`  ${n.content.slice(0, 300)}`);
+      lines.push("");
+    }
+    if (formSubmissions.length === 0 && salesIQChats.length === 0) { lines.push("No web entries."); }
     for (const f of formSubmissions) {
       lines.push(`[${fmtDate(f.createdAt)}] ${f.formName}`);
       if (f.fullName || f.firstName) lines.push(`  Name: ${f.fullName || [f.firstName, f.lastName].filter(Boolean).join(" ")}`);
@@ -391,7 +405,7 @@ export default function ContactDetail({ phone }: { phone: string }) {
                   { label: "SMS Messages", count: sms.length, color: "bg-blue-50 text-blue-700" },
                   { label: "Phone Calls", count: calls.length, color: "bg-green-50 text-green-700" },
                   { label: "Deals", count: deals.length, color: "bg-amber-50 text-amber-700" },
-                  { label: "Form Submissions", count: formSubmissions.length, color: "bg-emerald-50 text-emerald-700" },
+                  { label: "Web / Chat Entries", count: totalWebEntries, color: "bg-emerald-50 text-emerald-700" },
                 ].map(({ label, count, color }) => (
                   <div key={label} className={`rounded-lg p-3 ${color}`}>
                     <p className="text-2xl font-bold">{count}</p>
@@ -435,7 +449,7 @@ export default function ContactDetail({ phone }: { phone: string }) {
         )}
 
         {activeTab === "webform" && (
-          <WebformPanel webform={webform} contact={contact} formSubmissions={formSubmissions} />
+          <WebformPanel webform={webform} contact={contact} formSubmissions={formSubmissions} salesIQChats={salesIQChats} />
         )}
       </div>
     </div>
@@ -457,22 +471,30 @@ function Empty({ text }: { text: string }) {
   return <p className="text-sm text-gray-400 text-center py-8">{text}</p>;
 }
 
-type TLItem = { ts: string; kind: "sms" | "call" | "note"; data: SmsRecord | CallRecord | NoteRecord };
+type TLItem = { ts: string; kind: "sms" | "call" | "note" | "chat"; data: SmsRecord | CallRecord | NoteRecord };
 
 function TimelineCard({ item }: { item: TLItem }) {
-  const colors = { sms: "bg-blue-500", call: "bg-green-500", note: "bg-purple-500" };
-  const labels = { sms: "SMS", call: "Call", note: "Note" };
+  const colors = { sms: "bg-blue-500", call: "bg-green-500", note: "bg-purple-500", chat: "bg-teal-500" };
+  const labels = { sms: "SMS", call: "Call", note: "Note", chat: "Live Chat" };
+  const borders = { sms: "border-gray-200", call: "border-gray-200", note: "border-gray-200", chat: "border-teal-200" };
+  const bgs = { sms: "bg-white", call: "bg-white", note: "bg-white", chat: "bg-teal-50" };
   let preview = "";
   if (item.kind === "sms") preview = (item.data as SmsRecord).message?.slice(0, 100) ?? "";
   if (item.kind === "call") preview = `${(item.data as CallRecord).callType} · ${(item.data as CallRecord).duration ?? ""}`;
   if (item.kind === "note") preview = (item.data as NoteRecord).title ?? "";
+  if (item.kind === "chat") preview = (item.data as NoteRecord).title ?? "SalesIQ Live Chat";
 
   return (
     <div className="flex gap-3 items-start">
       <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${colors[item.kind]}`} />
-      <div className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2">
+      <div className={`flex-1 border rounded-lg px-3 py-2 ${bgs[item.kind]} ${borders[item.kind]}`}>
         <div className="flex justify-between items-center">
-          <span className="text-xs font-medium text-gray-500 uppercase">{labels[item.kind]}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-medium text-gray-500 uppercase">{labels[item.kind]}</span>
+            {item.kind === "chat" && (
+              <span className="text-xs bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded font-medium">Website Consent</span>
+            )}
+          </div>
           <span className="text-xs text-gray-400">{fmtDate(item.ts)}</span>
         </div>
         <p className="text-sm text-gray-700 mt-0.5 truncate">{preview || "—"}</p>
@@ -579,9 +601,44 @@ function DealCard({ deal }: { deal: DealRecord }) {
   );
 }
 
-function WebformPanel({ webform, contact, formSubmissions }: { webform: WebformData | null; contact: ContactRecord; formSubmissions: FormSubmission[] }) {
+function SalesIQChatCard({ note }: { note: NoteRecord }) {
+  return (
+    <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 border-l-4 border-l-teal-400">
+      <div className="flex justify-between items-start mb-2">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-teal-100 text-teal-700">
+            Live Chat · Website Consent
+          </span>
+        </div>
+        <span className="text-xs text-gray-400 shrink-0 ml-2">{fmtDate(note.createdTime)}</span>
+      </div>
+      <p className="text-sm font-medium text-gray-800">{note.title || "SalesIQ Chat"}</p>
+      {note.content && (
+        <p className="text-xs text-gray-600 mt-1 bg-white rounded p-2 border border-teal-100 whitespace-pre-wrap line-clamp-4">
+          {note.content}
+        </p>
+      )}
+      {note.owner && <p className="text-xs text-gray-400 mt-1">Agent: {note.owner}</p>}
+    </div>
+  );
+}
+
+function WebformPanel({ webform, contact, formSubmissions, salesIQChats }: { webform: WebformData | null; contact: ContactRecord; formSubmissions: FormSubmission[]; salesIQChats: NoteRecord[] }) {
   return (
     <div className="space-y-6">
+      {salesIQChats.length > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+            Live Chat Sessions — Website Consent ({salesIQChats.length})
+          </h3>
+          <div className="space-y-3">
+            {salesIQChats.map((n) => (
+              <SalesIQChatCard key={n.id} note={n} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {formSubmissions.length > 0 && (
         <div>
           <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
@@ -626,7 +683,7 @@ function WebformPanel({ webform, contact, formSubmissions }: { webform: WebformD
         </>
       )}
 
-      {!webform && formSubmissions.length === 0 && (
+      {!webform && formSubmissions.length === 0 && salesIQChats.length === 0 && (
         <Empty text="No webform or consent data found" />
       )}
     </div>

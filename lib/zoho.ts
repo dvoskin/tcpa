@@ -333,7 +333,6 @@ const CALL_FIELDS = "id, Subject, Call_Type, Call_Purpose, Call_Result, Call_Sta
 
 function applyCallFilters(row: Record<string, unknown>): boolean {
   const dur = row.Call_Duration_in_seconds as number | null | undefined;
-  if (dur === null || dur === undefined) return false;
   if (dur === 5) return false;
   const subj = (row.Subject as string) ?? "";
   if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subj)) return false;
