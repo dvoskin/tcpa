@@ -326,6 +326,22 @@ export default function ContactDetail({ phone }: { phone: string }) {
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{contact.fullName || "Unknown"}</h2>
             <p className="text-sm text-gray-500">{fmt(phone)}</p>
+            {contact.leadSource && (
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <span className="text-xs text-gray-400">Lead Source:</span>
+                <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
+                  {contact.leadSource}
+                </span>
+                {LEAD_SOURCE_TOOLTIPS[contact.leadSource] && (
+                  <span className="relative group inline-flex">
+                    <span className="w-3.5 h-3.5 rounded-full bg-gray-200 text-gray-500 text-[9px] font-bold flex items-center justify-center cursor-default select-none leading-none">i</span>
+                    <span className="pointer-events-none absolute left-5 top-0 z-50 w-64 rounded-md bg-gray-800 text-white text-xs px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg whitespace-normal">
+                      {LEAD_SOURCE_TOOLTIPS[contact.leadSource]}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex gap-2 flex-wrap justify-end items-start">
             <Badge label={contact.type} color={contact.type === "Contact" ? "blue" : "amber"} />
@@ -372,11 +388,16 @@ export default function ContactDetail({ phone }: { phone: string }) {
                 <p className="text-xs font-semibold text-amber-700 mb-1">
                   {allContacts.length} duplicate records merged for this number
                 </p>
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col gap-1">
                   {allContacts.map((c) => (
-                    <span key={c.id} className="text-xs text-amber-600">
-                      {c.fullName || "—"} · {c.type} · {c.owner || "no owner"}
-                    </span>
+                    <div key={c.id} className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs text-amber-600">{c.fullName || "—"} · {c.type} · {c.owner || "no owner"}</span>
+                      {c.leadSource && (
+                        <span className="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 rounded">
+                          {c.leadSource}
+                        </span>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -429,14 +450,14 @@ export default function ContactDetail({ phone }: { phone: string }) {
         {activeTab === "sms" && (
           <div className="space-y-2">
             {sms.length === 0 && <Empty text="No SMS messages found" />}
-            {sms.map((s) => <SmsCard key={s.id} sms={s} phone={phone} />)}
+            {sms.map((s) => <SmsCard key={s.id} sms={s} phone={phone} leadSource={contact.leadSource} />)}
           </div>
         )}
 
         {activeTab === "calls" && (
           <div className="space-y-2">
             {calls.length === 0 && <Empty text="No call records found" />}
-            {calls.map((c) => <CallCard key={c.id} call={c} />)}
+            {calls.map((c) => <CallCard key={c.id} call={c} leadSource={contact.leadSource} />)}
           </div>
         )}
 
@@ -444,7 +465,7 @@ export default function ContactDetail({ phone }: { phone: string }) {
         {activeTab === "deals" && (
           <div className="space-y-2">
             {deals.length === 0 && <Empty text="No transactions on record" />}
-            {deals.map((d) => <DealCard key={d.id} deal={d} />)}
+            {deals.map((d) => <DealCard key={d.id} deal={d} leadSource={contact.leadSource} />)}
           </div>
         )}
 
@@ -503,7 +524,7 @@ function TimelineCard({ item }: { item: TLItem }) {
   );
 }
 
-function SmsCard({ sms, phone }: { sms: SmsRecord; phone: string }) {
+function SmsCard({ sms, phone, leadSource }: { sms: SmsRecord; phone: string; leadSource?: string }) {
   // Use explicit directionType (SimpleTexting) or fall back to phone matching (Zoho)
   const isInbound = sms.directionType
     ? sms.directionType === "MO"
@@ -513,13 +534,16 @@ function SmsCard({ sms, phone }: { sms: SmsRecord; phone: string }) {
   return (
     <div className={`rounded-lg p-3 border ${isInbound ? "bg-white border-gray-200" : isST ? "bg-violet-50 border-violet-200" : "bg-blue-50 border-blue-200"}`}>
       <div className="flex justify-between items-center mb-1">
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
           <span className={`text-xs font-medium ${isInbound ? "text-gray-500" : isST ? "text-violet-600" : "text-blue-600"}`}>
             {isInbound ? "↙ Inbound" : "↗ Outbound"}
           </span>
           {sms.messageType && <Badge label={sms.messageType} color="gray" />}
           {sms.channel && <Badge label={sms.channel} color={isST ? "purple" : "gray"} />}
           {isST && sms.referenceType === "CMP" && <Badge label="Campaign" color="purple" />}
+          {leadSource && (
+            <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{leadSource}</span>
+          )}
         </div>
         <span className="text-xs text-gray-400">{fmtDate(sms.createdTime)}</span>
       </div>
@@ -532,15 +556,18 @@ function SmsCard({ sms, phone }: { sms: SmsRecord; phone: string }) {
   );
 }
 
-function CallCard({ call }: { call: CallRecord }) {
+function CallCard({ call, leadSource }: { call: CallRecord; leadSource?: string }) {
   const typeColor = call.callType === "Inbound" ? "green" : "blue";
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-3">
       <div className="flex justify-between items-start mb-1">
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
           <Badge label={call.callType || "Call"} color={typeColor} />
           {call.callResult && <Badge label={call.callResult} color="gray" />}
           {call.callPurpose && <Badge label={call.callPurpose} color="purple" />}
+          {leadSource && (
+            <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{leadSource}</span>
+          )}
         </div>
         <span className="text-xs text-gray-400 shrink-0 ml-2">{fmtDate(call.startTime)}</span>
       </div>
@@ -572,7 +599,7 @@ function NoteCard({ note }: { note: NoteRecord }) {
   );
 }
 
-function DealCard({ deal }: { deal: DealRecord }) {
+function DealCard({ deal, leadSource }: { deal: DealRecord; leadSource?: string }) {
   const stageColors: Record<string, string> = {
     "Closed Won": "green", "Closed Lost": "red",
     "Proposal": "blue", "Negotiation": "amber",
@@ -585,7 +612,12 @@ function DealCard({ deal }: { deal: DealRecord }) {
           <p className="text-sm font-medium text-gray-800">{deal.dealName}</p>
           {deal.accountName && <p className="text-xs text-gray-500">{deal.accountName}</p>}
         </div>
-        <Badge label={deal.stage} color={color} />
+        <div className="flex items-center gap-2">
+          {leadSource && (
+            <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{leadSource}</span>
+          )}
+          <Badge label={deal.stage} color={color} />
+        </div>
       </div>
       <div className="flex gap-4 mt-1">
         {deal.amount != null && (
