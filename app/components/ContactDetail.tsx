@@ -190,7 +190,7 @@ export default function ContactDetail({ phone }: { phone: string }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${(contact.fullName ?? phone).replace(/\s+/g, "_")}_${phone}.json`;
+    a.download = `${((contact?.fullName) ?? phone).replace(/\s+/g, "_")}_${phone}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
