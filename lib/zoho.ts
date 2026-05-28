@@ -152,11 +152,12 @@ export async function findAllContactsByPhone(phone: string): Promise<ContactReco
     const raw = await zohoGet(
       `/crm/v7/Contacts/search?phone=${encodeURIComponent(searchPhone)}&fields=${REST_CONTACT_FIELDS}&per_page=200`
     ) as { data?: Record<string, unknown>[] };
-    for (const c of raw.data ?? []) add(c, "Contact");
+    const found = raw.data ?? [];
+    console.log(`[contacts] search phone=${searchPhone} → ${found.length} results`);
+    for (const c of found) add(c, "Contact");
   }
 
-
-
+  console.log(`[contacts] total unique contacts for ${ten}: ${all.length} → IDs: ${all.map(c => c.id).join(", ")}`);
   return all;
 }
 
