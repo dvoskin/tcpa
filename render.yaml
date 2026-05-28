@@ -20,3 +20,5 @@ services:
         value: https://www.zohoapis.com
       - key: ZOHO_ACCOUNTS_URL
         value: https://accounts.zoho.com
+      - key: SIMPLE_TEXTING_API_KEY
+        sync: false

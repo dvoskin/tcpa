@@ -9,6 +9,7 @@ import {
   normalizePhone,
 } from "@/lib/zoho";
 import { getWebformSubmissions } from "@/lib/webforms";
+import { getSimpleTextingMessages } from "@/lib/simpletexting";
 
 export async function GET(
   _req: NextRequest,
@@ -27,13 +28,19 @@ export async function GET(
       return NextResponse.json({ contact: null, sms: [], calls: [], notes: [], deals: [], webform: null, formSubmissions });
     }
 
-    const [sms, calls, notes, deals, webform] = await Promise.all([
+    const [zohoSms, stSms, calls, notes, deals, webform] = await Promise.all([
       getSmsHistory(contact.id, normalized),
+      getSimpleTextingMessages(normalized),
       getCallHistory(contact.id, normalized),
       contact.type === "Contact" ? getNotes(contact.id) : Promise.resolve([]),
       contact.type === "Contact" ? getDeals(contact.id) : Promise.resolve([]),
       contact.type === "Contact" ? getWebformData(contact.id) : Promise.resolve(null),
     ]);
+
+    // Merge and sort all SMS sources newest-first
+    const sms = [...zohoSms, ...stSms].sort(
+      (a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime()
+    );
 
     return NextResponse.json({ contact, sms, calls, notes, deals, webform, formSubmissions });
   } catch (err) {

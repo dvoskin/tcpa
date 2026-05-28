@@ -12,6 +12,7 @@ interface ContactRecord {
 interface SmsRecord {
   id: string; fromNumber: string; toNumber: string; message: string;
   messageType: string; sentVia?: string; channel?: string; createdTime: string; media?: string[];
+  directionType?: "MT" | "MO"; referenceType?: string | null;
 }
 interface CallRecord {
   id: string; subject: string; callType: string; callPurpose?: string; callResult?: string;
@@ -360,16 +361,22 @@ function TimelineCard({ item }: { item: TLItem }) {
 }
 
 function SmsCard({ sms, phone }: { sms: SmsRecord; phone: string }) {
-  const isInbound = sms.fromNumber?.includes(phone.slice(-10));
+  // Use explicit directionType (SimpleTexting) or fall back to phone matching (Zoho)
+  const isInbound = sms.directionType
+    ? sms.directionType === "MO"
+    : sms.fromNumber?.includes(phone.slice(-10));
+  const isST = sms.channel === "SimpleTexting";
+
   return (
-    <div className={`rounded-lg p-3 border ${isInbound ? "bg-white border-gray-200" : "bg-blue-50 border-blue-200"}`}>
+    <div className={`rounded-lg p-3 border ${isInbound ? "bg-white border-gray-200" : isST ? "bg-violet-50 border-violet-200" : "bg-blue-50 border-blue-200"}`}>
       <div className="flex justify-between items-center mb-1">
         <div className="flex gap-2 items-center">
-          <span className={`text-xs font-medium ${isInbound ? "text-gray-500" : "text-blue-600"}`}>
+          <span className={`text-xs font-medium ${isInbound ? "text-gray-500" : isST ? "text-violet-600" : "text-blue-600"}`}>
             {isInbound ? "↙ Inbound" : "↗ Outbound"}
           </span>
           {sms.messageType && <Badge label={sms.messageType} color="gray" />}
-          {sms.channel && <Badge label={sms.channel} color="gray" />}
+          {sms.channel && <Badge label={sms.channel} color={isST ? "purple" : "gray"} />}
+          {isST && sms.referenceType === "CMP" && <Badge label="Campaign" color="purple" />}
         </div>
         <span className="text-xs text-gray-400">{fmtDate(sms.createdTime)}</span>
       </div>
@@ -377,7 +384,7 @@ function SmsCard({ sms, phone }: { sms: SmsRecord; phone: string }) {
       {sms.media && sms.media.length > 0 && (
         <p className="text-xs text-blue-500 mt-1">📎 {sms.media.length} media attachment(s)</p>
       )}
-      <p className="text-xs text-gray-400 mt-1">{sms.fromNumber} → {sms.toNumber}</p>
+      {!isST && <p className="text-xs text-gray-400 mt-1">{sms.fromNumber} → {sms.toNumber}</p>}
     </div>
   );
 }
