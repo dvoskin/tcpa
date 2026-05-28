@@ -172,15 +172,6 @@ export async function findAllContactsByPhone(phone: string): Promise<ContactReco
   ]);
   for (const c of [...byCustomPhone, ...byNormalized]) add(c as Record<string, unknown>, "Contact");
 
-  // Leads — split OR conditions into separate queries (COQL rejects OR)
-  const LEAD_FIELDS = "id, Full_Name, Email, Phone, Mobile, Lead_Source, Owner, Created_Time, Modified_Time";
-  const leadRows = (await Promise.all([
-    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Phone = '${escaped}' LIMIT 200`),
-    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Mobile = '${escaped}' LIMIT 200`),
-    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Phone = '${escaped164}' LIMIT 200`),
-    coql(`SELECT ${LEAD_FIELDS} FROM Leads WHERE Mobile = '${escaped164}' LIMIT 200`),
-  ])).flat();
-  for (const l of leadRows) add(l as Record<string, unknown>, "Lead");
 
   return all;
 }
