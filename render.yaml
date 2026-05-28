@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: tcpa-dashboard
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22.22.3
+      - key: ZOHO_CLIENT_ID
+        sync: false
+      - key: ZOHO_CLIENT_SECRET
+        sync: false
+      - key: ZOHO_REFRESH_TOKEN
+        sync: false
+      - key: ZOHO_BASE_URL
+        value: https://www.zohoapis.com
+      - key: ZOHO_ACCOUNTS_URL
+        value: https://accounts.zoho.com
