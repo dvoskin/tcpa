@@ -365,6 +365,9 @@ export async function getCallHistory(contactId: string, phone: string): Promise<
     if (seenIds.has(row.id as string)) continue;
     // Skip calls with no logged duration — these are system-generated placeholders
     if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) continue;
+    // Skip automation-generated follow-up calls (subject contains Follow/FollowUp/FU)
+    const subjectRaw = (row.Subject as string) ?? "";
+    if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subjectRaw)) continue;
     seenIds.add(row.id as string);
     const whoId = row.Who_Id as Record<string, unknown> | null;
     results.push({
