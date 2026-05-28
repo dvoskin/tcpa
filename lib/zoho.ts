@@ -121,16 +121,6 @@ export interface ContactRecord {
   deduplicationStatus?: string;
 }
 
-// COQL-safe fields for Contacts (excludes lookup fields like Account_Name which cause NO_PERMISSION)
-const CONTACT_COQL_FIELDS = [
-  "id", "Full_Name", "Email", "Phone", "Mobile", "Lead_Source",
-  "Owner", "Created_Time", "Modified_Time", "Data_Source", "Campaign_Name",
-  "Ad_Campaign_Name", "GCLID", "Facebook_Lead_ID", "patient_id",
-  "Best_Contact_Time", "Preferred_Agent_ID", "Deduplication_Status",
-  "Customer_phone_number", "Phone_Normalized",
-  "Medullary_thyroid_cancer_or_a_history_of_such",
-  "Did_anyone_assist_with_the_order",
-].join(", ");
 
 const REST_CONTACT_FIELDS = [
   "id", "Full_Name", "Email", "Phone", "Mobile", "Account_Name", "Lead_Source",
