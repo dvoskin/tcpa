@@ -334,13 +334,14 @@ export async function getCallHistory(contactId: string, phone: string): Promise<
   const results: CallRecord[] = [];
   const seenIds = new Set<string>();
 
-  // Only return logged/closed calls — exclude Overdue (scheduled but never completed)
-  // Completed = outbound calls that were placed; null = inbound/missed (also real events)
-  const qContact = `SELECT id, Subject, Call_Type, Call_Purpose, Call_Result, Call_Start_Time, Call_Duration, Call_Duration_in_seconds, Description, Who_Id, Dialled_Number, Caller_ID, Outgoing_Call_Status, Call_Summary, RingCentral_Call_ID FROM Calls WHERE Who_Id = '${contactId}' AND (Outgoing_Call_Status = 'Completed' OR Outgoing_Call_Status is null) ORDER BY Call_Start_Time DESC LIMIT 200`;
+  // Exclude Overdue (scheduled, never placed) — != 'Overdue' also returns null-status rows (inbound/missed)
+  const qContact = `SELECT id, Subject, Call_Type, Call_Purpose, Call_Result, Call_Start_Time, Call_Duration, Call_Duration_in_seconds, Description, Who_Id, Dialled_Number, Caller_ID, Outgoing_Call_Status, Call_Summary, RingCentral_Call_ID FROM Calls WHERE Who_Id = '${contactId}' AND Outgoing_Call_Status != 'Overdue' ORDER BY Call_Start_Time DESC LIMIT 200`;
 
   for (const r of await coql(qContact)) {
     const row = r as Record<string, unknown>;
     if (seenIds.has(row.id as string)) continue;
+    // Skip calls with no logged duration — these are system-generated placeholders
+    if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) continue;
     seenIds.add(row.id as string);
     const whoId = row.Who_Id as Record<string, unknown> | null;
     results.push({

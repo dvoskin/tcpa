@@ -98,7 +98,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-type Tab = "overview" | "timeline" | "sms" | "calls" | "notes" | "deals" | "webform";
+type Tab = "overview" | "sms" | "calls" | "deals" | "webform" | "timeline";
 
 export default function ContactDetail({ phone }: { phone: string }) {
   const [data, setData] = useState<ApiResponse | null>(null);
@@ -169,12 +169,11 @@ export default function ContactDetail({ phone }: { phone: string }) {
 
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "overview", label: "Overview" },
-    { id: "timeline", label: "Timeline", count: sms.length + calls.length + notes.length },
     { id: "sms", label: "SMS", count: sms.length },
     { id: "calls", label: "Calls", count: calls.length },
-    { id: "notes", label: "Notes", count: notes.length },
     { id: "deals", label: "Transactions", count: deals.length },
     { id: "webform", label: "Webform / Consent", count: formSubmissions.length > 0 ? formSubmissions.length : undefined },
+    { id: "timeline", label: "Timeline", count: sms.length + calls.length + notes.length },
   ];
 
   // Build merged timeline
@@ -185,6 +184,17 @@ export default function ContactDetail({ phone }: { phone: string }) {
     ...notes.map((n) => ({ ts: n.createdTime, kind: "note" as const, data: n })),
   ].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
 
+  function exportRecord() {
+    const payload = { contact, phone, sms, calls, notes, deals, webform, formSubmissions, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(contact.fullName ?? phone).replace(/\s+/g, "_")}_${phone}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -194,10 +204,16 @@ export default function ContactDetail({ phone }: { phone: string }) {
             <h2 className="text-lg font-semibold text-gray-900">{contact.fullName || "Unknown"}</h2>
             <p className="text-sm text-gray-500">{fmt(phone)}</p>
           </div>
-          <div className="flex gap-2 flex-wrap justify-end">
+          <div className="flex gap-2 flex-wrap justify-end items-start">
             <Badge label={contact.type} color={contact.type === "Contact" ? "blue" : "amber"} />
             {contact.accountName && <Badge label={contact.accountName} color="purple" />}
             {contact.owner && <Badge label={contact.owner} color="gray" />}
+            <button
+              onClick={exportRecord}
+              className="ml-1 px-3 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-colors"
+            >
+              Export
+            </button>
           </div>
         </div>
       </div>
@@ -252,8 +268,8 @@ export default function ContactDetail({ phone }: { phone: string }) {
                 {[
                   { label: "SMS Messages", count: sms.length, color: "bg-blue-50 text-blue-700" },
                   { label: "Phone Calls", count: calls.length, color: "bg-green-50 text-green-700" },
-                  { label: "Notes", count: notes.length, color: "bg-purple-50 text-purple-700" },
                   { label: "Deals", count: deals.length, color: "bg-amber-50 text-amber-700" },
+                  { label: "Form Submissions", count: formSubmissions.length, color: "bg-emerald-50 text-emerald-700" },
                 ].map(({ label, count, color }) => (
                   <div key={label} className={`rounded-lg p-3 ${color}`}>
                     <p className="text-2xl font-bold">{count}</p>
@@ -288,12 +304,6 @@ export default function ContactDetail({ phone }: { phone: string }) {
           </div>
         )}
 
-        {activeTab === "notes" && (
-          <div className="space-y-2">
-            {notes.length === 0 && <Empty text="No notes on file" />}
-            {notes.map((n) => <NoteCard key={n.id} note={n} />)}
-          </div>
-        )}
 
         {activeTab === "deals" && (
           <div className="space-y-2">
@@ -472,14 +482,6 @@ function WebformPanel({ webform, contact, formSubmissions }: { webform: WebformD
             <Row label="Zoho Campaign ID" value={webform.zcampaignId} />
           </Section>
           <Section title="Consent Disclosures">
-            <Row
-              label="Medullary Thyroid Cancer History"
-              value={webform.medullaryThyroidCancerConsent ?? "Not answered"}
-            />
-            <Row
-              label="Order Assisted By Agent"
-              value={webform.assistedOrder ?? "Not answered"}
-            />
             <Row
               label="Email Opt-Out"
               value={
