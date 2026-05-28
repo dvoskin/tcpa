@@ -342,46 +342,63 @@ function applyCallFilters(row: Record<string, unknown>): boolean {
   return true;
 }
 
-// From_Number__s and To_Number__s are not accessible via COQL with current OAuth scopes
 export async function getCallHistory(contactIds: string[], phone: string): Promise<CallRecord[]> {
   const seenIds = new Set<string>();
   const results: CallRecord[] = [];
+  const debugDropped: { id: string; subject: string; dur: unknown; status: unknown; reason: string }[] = [];
 
   function pushCall(row: Record<string, unknown>) {
     if (seenIds.has(row.id as string)) return;
-    if (!applyCallFilters(row)) return;
+    const dur = row.Call_Duration_in_seconds as number | null | undefined;
+    const status = row.Outgoing_Call_Status as string | null | undefined;
+    const subj = (row.Subject as string) ?? "";
+    if (!applyCallFilters(row)) {
+      let reason = "unknown";
+      if (status === "Overdue") reason = "Overdue status";
+      else if (dur === 5) reason = "exactly 5s duration";
+      else if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subj)) reason = "follow/FU subject";
+      else if (/ringcentral logged call/i.test(subj)) reason = "RC logged call dupe";
+      debugDropped.push({ id: row.id as string, subject: subj.slice(0, 80), dur, status, reason });
+      return;
+    }
     seenIds.add(row.id as string);
     const whoId = row.Who_Id as Record<string, unknown> | null;
     results.push({
       id: row.id as string,
-      subject: (row.Subject as string) ?? "",
+      subject: subj,
       callType: (row.Call_Type as string) ?? "",
       callPurpose: (row.Call_Purpose as string) ?? undefined,
       callResult: (row.Call_Result as string) ?? undefined,
       startTime: (row.Call_Start_Time as string) ?? "",
-      durationSeconds: (row.Call_Duration_in_seconds as number) ?? undefined,
+      durationSeconds: dur ?? undefined,
       duration: (row.Call_Duration as string) ?? undefined,
       description: (row.Description as string) ?? undefined,
       contactName: whoId ? (whoId.name as string) : undefined,
       dialledNumber: (row.Dialled_Number as string) ?? undefined,
       callerId: (row.Caller_ID as string) ?? undefined,
-      outgoingStatus: (row.Outgoing_Call_Status as string) ?? undefined,
+      outgoingStatus: status ?? undefined,
       summary: (row.Call_Summary as string) ?? undefined,
       ringcentralCallId: (row.RingCentral_Call_ID as string) ?? undefined,
     });
   }
 
   // Fan out across all contact IDs — Who_Id is polymorphic, parallel queries are safer than `in`
+  console.log(`[calls] querying ${contactIds.length} contact IDs for phone ${phone}`);
   await Promise.all(contactIds.map(async (contactId) => {
     const q = `SELECT ${CALL_FIELDS} FROM Calls WHERE Who_Id = '${contactId}' ORDER BY Call_Start_Time DESC LIMIT 200`;
-    for (const r of await coql(q)) pushCall(r as Record<string, unknown>);
+    const rows = await coql(q);
+    console.log(`[calls] contact ${contactId} → ${rows.length} raw rows from COQL`);
+    for (const r of rows) pushCall(r as Record<string, unknown>);
   }));
 
   // Catch calls RingCentral logged without linking to a contact (Who_Id = null)
-  // by searching the Subject for the phone number in E.164 format
-  const subjectRows = await coql(`SELECT ${CALL_FIELDS} FROM Calls WHERE Subject like '%${phone}%' AND Outgoing_Call_Status != 'Overdue' ORDER BY Call_Start_Time DESC LIMIT 200`);
+  // Phone appears in Subject as (+1XXXXXXXXXX) — the E.164 digits are a contiguous substring
+  const e164 = `+1${phone}`;
+  const subjectRows = await coql(`SELECT ${CALL_FIELDS} FROM Calls WHERE Subject like '%${e164}%' ORDER BY Call_Start_Time DESC LIMIT 200`);
+  console.log(`[calls] subject LIKE '%${e164}%' → ${subjectRows.length} rows`);
   for (const r of subjectRows) pushCall(r as Record<string, unknown>);
 
+  console.log(`[calls] result: ${results.length} kept, ${debugDropped.length} dropped:`, JSON.stringify(debugDropped));
   return results.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 }
 
