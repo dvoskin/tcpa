@@ -332,6 +332,8 @@ export interface CallRecord {
 const CALL_FIELDS = "id, Subject, Call_Type, Call_Purpose, Call_Result, Call_Start_Time, Call_Duration, Call_Duration_in_seconds, Description, Who_Id, Dialled_Number, Caller_ID, Outgoing_Call_Status, Call_Summary, RingCentral_Call_ID";
 
 function applyCallFilters(row: Record<string, unknown>): boolean {
+  // Drop scheduled-but-not-completed calls (Overdue = past-due scheduled activity)
+  if ((row.Outgoing_Call_Status as string) === "Overdue") return false;
   const dur = row.Call_Duration_in_seconds as number | null | undefined;
   if (dur === 5) return false;
   const subj = (row.Subject as string) ?? "";
@@ -371,7 +373,7 @@ export async function getCallHistory(contactIds: string[], phone: string): Promi
 
   // Fan out across all contact IDs — Who_Id is polymorphic, parallel queries are safer than `in`
   await Promise.all(contactIds.map(async (contactId) => {
-    const q = `SELECT ${CALL_FIELDS} FROM Calls WHERE Who_Id = '${contactId}' AND Outgoing_Call_Status != 'Overdue' ORDER BY Call_Start_Time DESC LIMIT 200`;
+    const q = `SELECT ${CALL_FIELDS} FROM Calls WHERE Who_Id = '${contactId}' ORDER BY Call_Start_Time DESC LIMIT 200`;
     for (const r of await coql(q)) pushCall(r as Record<string, unknown>);
   }));
 
