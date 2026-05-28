@@ -27,6 +27,23 @@ export async function getAccessToken(): Promise<string> {
   return cachedToken!;
 }
 
+// REST API search — supports criteria on fields not queryable in COQL
+async function zohoSearch(module: string, criteria: string): Promise<unknown[]> {
+  const token = await getAccessToken();
+  const res = await fetch(
+    `${BASE_URL}/crm/v7/${module}/search?criteria=${encodeURIComponent(criteria)}&per_page=200`,
+    { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+  );
+  if (res.status === 204) return [];
+  if (!res.ok) return [];
+  const text = await res.text();
+  if (!text || !text.trim()) return [];
+  try {
+    const d = JSON.parse(text) as { data?: unknown[] };
+    return d.data ?? [];
+  } catch { return []; }
+}
+
 async function zohoGet(path: string): Promise<unknown> {
   const token = await getAccessToken();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -258,16 +275,11 @@ export interface SmsRecord {
 }
 
 export async function getSmsHistory(contactId: string, phone: string): Promise<SmsRecord[]> {
-  void phone; // phone fallback not used — SMS fields aren't searchable in COQL WHERE
   const results: SmsRecord[] = [];
   const seenIds = new Set<string>();
 
-  // ── Module 1: HelloSend / RingCentral Bulk SMS ───────────────────────────────
-  const q1 = `SELECT id, ringcentralbulksmsextensionforzohocrm__From_Number, ringcentralbulksmsextensionforzohocrm__To, ringcentralbulksmsextensionforzohocrm__SMS, ringcentralbulksmsextensionforzohocrm__SMS_Type, ringcentralbulksmsextensionforzohocrm__SMS_Sent_Via, ringcentralbulksmsextensionforzohocrm__Channel, ringcentralbulksmsextensionforzohocrm__Media_1, ringcentralbulksmsextensionforzohocrm__Media_2, ringcentralbulksmsextensionforzohocrm__Media_3, Created_Time FROM ringcentralbulksmsextensionforzohocrm__RingCentral_SMS_History WHERE ringcentralbulksmsextensionforzohocrm__Contact_Lookup = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
-
-  for (const r of await coql(q1)) {
-    const row = r as Record<string, unknown>;
-    if (seenIds.has(row.id as string)) continue;
+  function pushHelloSend(row: Record<string, unknown>) {
+    if (seenIds.has(row.id as string)) return;
     seenIds.add(row.id as string);
     const media = [
       row.ringcentralbulksmsextensionforzohocrm__Media_1,
@@ -287,9 +299,20 @@ export async function getSmsHistory(contactId: string, phone: string): Promise<S
     });
   }
 
+  // ── Module 1a: HelloSend by Contact_Lookup (linked records) ─────────────────
+  const q1 = `SELECT id, ringcentralbulksmsextensionforzohocrm__From_Number, ringcentralbulksmsextensionforzohocrm__To, ringcentralbulksmsextensionforzohocrm__SMS, ringcentralbulksmsextensionforzohocrm__SMS_Type, ringcentralbulksmsextensionforzohocrm__SMS_Sent_Via, ringcentralbulksmsextensionforzohocrm__Channel, ringcentralbulksmsextensionforzohocrm__Media_1, ringcentralbulksmsextensionforzohocrm__Media_2, ringcentralbulksmsextensionforzohocrm__Media_3, Created_Time FROM ringcentralbulksmsextensionforzohocrm__RingCentral_SMS_History WHERE ringcentralbulksmsextensionforzohocrm__Contact_Lookup = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
+  for (const r of await coql(q1)) pushHelloSend(r as Record<string, unknown>);
+
+  // ── Module 1b: HelloSend by To phone — catches records not linked to contact ─
+  // COQL WHERE on the To field is unsupported; REST search works with E.164 format
+  const e164 = `+1${phone}`;
+  for (const r of await zohoSearch(
+    "ringcentralbulksmsextensionforzohocrm__RingCentral_SMS_History",
+    `(ringcentralbulksmsextensionforzohocrm__To:equals:${e164})`
+  )) pushHelloSend(r as Record<string, unknown>);
+
   // ── Module 2: RingCentral ABR Extension SMS ──────────────────────────────────
   const q2 = `SELECT id, ringcentralextensionabr__From_Number, ringcentralextensionabr__To_Number, ringcentralextensionabr__Message, ringcentralextensionabr__Message_Source, ringcentralextensionabr__Has_Attachment, ringcentralextensionabr__Contact, Created_Time FROM ringcentralextensionabr__RingCentral_SMS_History WHERE ringcentralextensionabr__Contact = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
-
   for (const r of await coql(q2)) {
     const row = r as Record<string, unknown>;
     if (seenIds.has(row.id as string)) continue;

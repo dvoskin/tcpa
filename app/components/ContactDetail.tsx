@@ -186,12 +186,86 @@ export default function ContactDetail({ phone }: { phone: string }) {
   ].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
 
   function exportRecord() {
-    const payload = { contact, phone, sms, calls, notes, deals, webform, formSubmissions, exportedAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const lines: string[] = [];
+    const sep = (title: string) => { lines.push(""); lines.push(`${"=".repeat(60)}`); lines.push(title.toUpperCase()); lines.push("=".repeat(60)); };
+    const fmtDate = (s: string) => { try { return new Date(s).toLocaleString(); } catch { return s; } };
+
+    lines.push(`TCPA COMPLIANCE RECORD EXPORT`);
+    lines.push(`Exported: ${new Date().toLocaleString()}`);
+    lines.push(`Phone: ${fmt(phone)}`);
+
+    sep("Contact Information");
+    if (contact) {
+      lines.push(`Name:        ${contact.fullName || "—"}`);
+      lines.push(`Type:        ${contact.type}`);
+      lines.push(`Email:       ${contact.email || "—"}`);
+      lines.push(`Phone:       ${contact.phone || "—"}`);
+      lines.push(`Mobile:      ${contact.mobile || "—"}`);
+      lines.push(`Account:     ${contact.accountName || "—"}`);
+      lines.push(`Owner:       ${contact.owner || "—"}`);
+      lines.push(`Lead Source: ${contact.leadSource || "—"}`);
+      lines.push(`Created:     ${contact.createdTime ? fmtDate(contact.createdTime) : "—"}`);
+    } else {
+      lines.push("No CRM contact found.");
+    }
+
+    sep(`SMS Messages (${sms.length})`);
+    if (sms.length === 0) { lines.push("No SMS records."); }
+    for (const m of sms) {
+      const dir = m.directionType === "MO" ? "INBOUND" : "OUTBOUND";
+      lines.push(`[${fmtDate(m.createdTime)}] ${dir} via ${m.channel || "—"}`);
+      lines.push(`  From: ${m.fromNumber}  To: ${m.toNumber}`);
+      lines.push(`  ${m.message}`);
+      if (m.media && m.media.length > 0) lines.push(`  Media: ${m.media.join(", ")}`);
+      lines.push("");
+    }
+
+    sep(`Phone Calls (${calls.length})`);
+    if (calls.length === 0) { lines.push("No call records."); }
+    for (const c of calls) {
+      lines.push(`[${fmtDate(c.startTime)}] ${c.subject}`);
+      lines.push(`  Type: ${c.callType}  Duration: ${c.duration || "—"}  Status: ${c.outgoingStatus || "—"}`);
+      if (c.description) lines.push(`  Notes: ${c.description}`);
+      lines.push("");
+    }
+
+    sep(`Deals / Transactions (${deals.length})`);
+    if (deals.length === 0) { lines.push("No deal records."); }
+    for (const d of deals) {
+      lines.push(`[${fmtDate(d.createdTime)}] ${d.dealName}`);
+      lines.push(`  Stage: ${d.stage}  Amount: ${d.amount != null ? `$${d.amount}` : "—"}  Close: ${d.closingDate || "—"}`);
+      lines.push("");
+    }
+
+    sep(`Web Form Submissions (${formSubmissions.length})`);
+    if (formSubmissions.length === 0) { lines.push("No form submissions."); }
+    for (const f of formSubmissions) {
+      lines.push(`[${fmtDate(f.createdAt)}] ${f.formName}`);
+      if (f.fullName || f.firstName) lines.push(`  Name: ${f.fullName || [f.firstName, f.lastName].filter(Boolean).join(" ")}`);
+      if (f.email) lines.push(`  Email: ${f.email}`);
+      if (f.phone) lines.push(`  Phone: ${f.phone}`);
+      if (f.consentChecked !== undefined) lines.push(`  Consent: ${f.consentChecked ? "YES" : "NO"}`);
+      if (f.utmSource) lines.push(`  UTM Source: ${f.utmSource}`);
+      if (f.utmCampaign) lines.push(`  UTM Campaign: ${f.utmCampaign}`);
+      lines.push("");
+    }
+
+    if (webform) {
+      sep("CRM Web Form / Consent Data");
+      lines.push(`Lead Source:   ${webform.leadSource || "—"}`);
+      lines.push(`Data Source:   ${webform.dataSource || "—"}`);
+      lines.push(`Campaign:      ${webform.campaignName || "—"}`);
+      lines.push(`GCLID:         ${webform.gclid || "—"}`);
+      lines.push(`FB Lead ID:    ${webform.facebookLeadId || "—"}`);
+      lines.push(`Email Opt-Out: ${webform.emailOptOut ? "YES" : "NO"}`);
+    }
+
+    const text = lines.join("\n");
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${((contact?.fullName) ?? phone).replace(/\s+/g, "_")}_${phone}.json`;
+    a.download = `${((contact?.fullName) ?? phone).replace(/\s+/g, "_")}_${phone}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
