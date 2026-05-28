@@ -99,6 +99,40 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+const LEAD_SOURCE_TOOLTIPS: Record<string, string> = {
+  "Instagram": "The lead sent an inbound message and the system automatically created a record to handle the inquiry.",
+  "Instagram API": "The lead sent an inbound message and the system automatically created a record to handle the inquiry.",
+  "Google AdWords": "The lead inquired through a paid ad or via website from a paid ad campaign.",
+  "Google Ads": "The lead inquired through a paid ad or via website from a paid ad campaign.",
+  "Facebook": "The lead inquired through a paid ad or via website from a paid ad campaign.",
+  "Facebook Lead Ads": "The lead inquired through a paid ad or via website from a paid ad campaign.",
+  "Web Form": "The lead came through the website with consent.",
+  "Website": "The lead came through the website with consent.",
+  "Web Site": "The lead came through the website with consent.",
+  "Website Lead Form": "The lead came through the website with consent.",
+};
+
+function LeadSourceRow({ value }: { value?: string }) {
+  if (!value) return null;
+  const tooltip = LEAD_SOURCE_TOOLTIPS[value];
+  return (
+    <div className="flex gap-2 py-1 items-start">
+      <span className="text-xs text-gray-500 w-40 shrink-0 pt-0.5">Lead Source</span>
+      <span className="text-sm text-gray-800 break-words min-w-0 flex items-center gap-1.5">
+        {value}
+        {tooltip && (
+          <span className="relative group inline-flex">
+            <span className="w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold flex items-center justify-center cursor-default select-none leading-none">i</span>
+            <span className="pointer-events-none absolute left-5 top-0 z-50 w-64 rounded-md bg-gray-800 text-white text-xs px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg whitespace-normal">
+              {tooltip}
+            </span>
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 type Tab = "overview" | "sms" | "calls" | "deals" | "webform" | "timeline";
 
 export default function ContactDetail({ phone }: { phone: string }) {
@@ -254,7 +288,6 @@ export default function ContactDetail({ phone }: { phone: string }) {
       sep("CRM Web Form / Consent Data");
       lines.push(`Lead Source:   ${webform.leadSource || "—"}`);
       lines.push(`Data Source:   ${webform.dataSource || "—"}`);
-      lines.push(`Campaign:      ${webform.campaignName || "—"}`);
       lines.push(`GCLID:         ${webform.gclid || "—"}`);
       lines.push(`FB Lead ID:    ${webform.facebookLeadId || "—"}`);
       lines.push(`Email Opt-Out: ${webform.emailOptOut ? "YES" : "NO"}`);
@@ -334,9 +367,8 @@ export default function ContactDetail({ phone }: { phone: string }) {
             </Section>
             <Section title="Account">
               <Row label="Account Name" value={contact.accountName} />
-              <Row label="Lead Source" value={contact.leadSource} />
+              <LeadSourceRow value={contact.leadSource} />
               <Row label="Data Source" value={contact.dataSource} />
-              <Row label="Campaign" value={contact.campaignName} />
             </Section>
             <Section title="Activity Summary">
               <div className="grid grid-cols-3 gap-3 mt-2">
@@ -551,9 +583,8 @@ function WebformPanel({ webform, contact, formSubmissions }: { webform: WebformD
       {webform && (
         <>
           <Section title="Lead / Webform Source (CRM)">
-            <Row label="Lead Source" value={webform.leadSource} />
+            <LeadSourceRow value={webform.leadSource} />
             <Row label="Data Source" value={webform.dataSource} />
-            <Row label="Campaign Name" value={webform.campaignName} />
             <Row label="Ad Group" value={webform.adGroupName} />
             <Row label="Ad Creative" value={webform.adsCreativeName} />
             <Row label="GCLID (Google)" value={webform.gclid} />
