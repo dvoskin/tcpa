@@ -302,7 +302,7 @@ export async function getSmsHistory(contactIds: string[], phone: string): Promis
     const q = `SELECT id, ringcentralextensionabr__From_Number, ringcentralextensionabr__To_Number, ringcentralextensionabr__Message, ringcentralextensionabr__Message_Source, ringcentralextensionabr__Has_Attachment, ringcentralextensionabr__Contact, Created_Time FROM ringcentralextensionabr__RingCentral_SMS_History WHERE ringcentralextensionabr__Contact = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
     for (const r of await coql(q)) {
       const row = r as Record<string, unknown>;
-      if (seenIds.has(row.id as string)) return;
+      if (seenIds.has(row.id as string)) continue;
       seenIds.add(row.id as string);
       results.push({
         id: row.id as string,
@@ -350,14 +350,14 @@ export async function getCallHistory(contactIds: string[], phone: string): Promi
     const q = `SELECT id, Subject, Call_Type, Call_Purpose, Call_Result, Call_Start_Time, Call_Duration, Call_Duration_in_seconds, Description, Who_Id, Dialled_Number, Caller_ID, Outgoing_Call_Status, Call_Summary, RingCentral_Call_ID FROM Calls WHERE Who_Id = '${contactId}' AND Outgoing_Call_Status != 'Overdue' ORDER BY Call_Start_Time DESC LIMIT 200`;
     for (const r of await coql(q)) {
       const row = r as Record<string, unknown>;
-      if (seenIds.has(row.id as string)) return;
+      if (seenIds.has(row.id as string)) continue;
       // Skip calls with no logged duration or too short to be real
-      if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) return;
-      if ((row.Call_Duration_in_seconds as number) === 5) return;
+      if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) continue;
+      if ((row.Call_Duration_in_seconds as number) === 5) continue;
       // Skip automation-generated follow-up calls and RingCentral auto-logged duplicates
       const subjectRaw = (row.Subject as string) ?? "";
-      if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subjectRaw)) return;
-      if (/ringcentral logged call/i.test(subjectRaw)) return;
+      if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subjectRaw)) continue;
+      if (/ringcentral logged call/i.test(subjectRaw)) continue;
       seenIds.add(row.id as string);
       const whoId = row.Who_Id as Record<string, unknown> | null;
       results.push({
@@ -403,7 +403,7 @@ export async function getDeals(contactIds: string[]): Promise<DealRecord[]> {
     const q = `SELECT id, Deal_Name, Stage, Amount, Closing_Date, Created_Time, Owner FROM Deals WHERE Contact_Name = '${contactId}' ORDER BY Created_Time DESC LIMIT 100`;
     for (const r of await coql(q)) {
       const d = r as Record<string, unknown>;
-      if (seen.has(d.id as string)) return;
+      if (seen.has(d.id as string)) continue;
       seen.add(d.id as string);
       const owner = d.Owner as Record<string, unknown> | null;
       all.push({
