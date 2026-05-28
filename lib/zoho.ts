@@ -165,20 +165,6 @@ export async function findAllContactsByPhone(phone: string): Promise<ContactReco
     for (const c of raw.data ?? []) add(c, "Contact");
   }
 
-  // COQL for custom phone fields — select only id to avoid field validation errors,
-  // then fetch full contact data via REST for any new IDs not already found
-  const [byCustomPhone, byNormalized] = await Promise.all([
-    coql(`SELECT id FROM Contacts WHERE Customer_phone_number = '${escaped}' LIMIT 200`),
-    coql(`SELECT id FROM Contacts WHERE Phone_Normalized = '${escaped}' LIMIT 200`),
-  ]);
-  const extraIds = [...byCustomPhone, ...byNormalized]
-    .map((r) => (r as Record<string, unknown>).id as string)
-    .filter((id) => !seen.has(id));
-  await Promise.all(extraIds.map(async (id) => {
-    const raw = await zohoGet(`/crm/v7/Contacts/${id}?fields=${REST_CONTACT_FIELDS}`) as { data?: Record<string, unknown>[] };
-    const c = (raw.data ?? [])[0] ?? (raw as Record<string, unknown>);
-    if (c.id) add(c as Record<string, unknown>, "Contact");
-  }));
 
 
   return all;
