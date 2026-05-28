@@ -132,63 +132,53 @@ const CONTACT_COQL_FIELDS = [
   "Did_anyone_assist_with_the_order",
 ].join(", ");
 
-export async function findContactByPhone(phone: string): Promise<ContactRecord | null> {
+const REST_CONTACT_FIELDS = [
+  "id", "Full_Name", "Email", "Phone", "Mobile", "Account_Name", "Lead_Source",
+  "Owner", "Created_Time", "Modified_Time", "Data_Source", "Campaign_Name",
+  "Ad_Campaign_Name", "GCLID", "Facebook_Lead_ID", "patient_id",
+  "Best_Contact_Time", "Preferred_Agent_ID", "Deduplication_Status",
+  "Customer_phone_number", "Phone_Normalized",
+  "Medullary_thyroid_cancer_or_a_history_of_such",
+  "Did_anyone_assist_with_the_order",
+].join(",");
+
+// Returns ALL contacts/leads matching the phone — covers duplicates across all records
+export async function findAllContactsByPhone(phone: string): Promise<ContactRecord[]> {
   const ten = normalizePhone(phone);
   const e164 = `+1${ten}`;
   const escaped = ten.replace(/'/g, "\\'");
   const escaped164 = e164.replace(/'/g, "\\'");
+  const seen = new Set<string>();
+  const all: ContactRecord[] = [];
 
-  // Try Contacts first using REST search (handles lookup fields like Account_Name)
-  const contactFields = [
-    "id", "Full_Name", "Email", "Phone", "Mobile", "Account_Name", "Lead_Source",
-    "Owner", "Created_Time", "Modified_Time", "Data_Source", "Campaign_Name",
-    "Ad_Campaign_Name", "GCLID", "Facebook_Lead_ID", "patient_id",
-    "Best_Contact_Time", "Preferred_Agent_ID", "Deduplication_Status",
-    "Customer_phone_number", "Phone_Normalized",
-    "Medullary_thyroid_cancer_or_a_history_of_such",
-    "Did_anyone_assist_with_the_order",
-  ].join(",");
+  function add(c: Record<string, unknown>, type: "Contact" | "Lead") {
+    if (seen.has(c.id as string)) return;
+    seen.add(c.id as string);
+    all.push(mapContact(c, type));
+  }
 
-  // Try phone then mobile via REST search
+  // REST search covers Phone + Mobile fields and returns all matches
   for (const searchPhone of [ten, e164]) {
     const raw = await zohoGet(
-      `/crm/v7/Contacts/search?phone=${encodeURIComponent(searchPhone)}&fields=${contactFields}&per_page=1`
+      `/crm/v7/Contacts/search?phone=${encodeURIComponent(searchPhone)}&fields=${REST_CONTACT_FIELDS}&per_page=200`
     ) as { data?: Record<string, unknown>[] };
-    if (raw.data && raw.data.length > 0) {
-      return mapContact(raw.data[0], "Contact");
-    }
+    for (const c of raw.data ?? []) add(c, "Contact");
   }
 
-  // Also try COQL for custom phone fields (Customer_phone_number, Phone_Normalized)
-  const contactQuery = `
-    SELECT ${CONTACT_COQL_FIELDS}
-    FROM Contacts
-    WHERE Customer_phone_number = '${escaped}'
-       OR Phone_Normalized = '${escaped}'
-    LIMIT 1
-  `;
-  const contacts = await coql(contactQuery.trim());
-  if (contacts.length > 0) {
-    const c = contacts[0] as Record<string, unknown>;
-    return mapContact(c, "Contact");
-  }
+  // COQL for custom phone fields not covered by REST phone search
+  const customQ = `SELECT ${CONTACT_COQL_FIELDS} FROM Contacts WHERE Customer_phone_number = '${escaped}' OR Phone_Normalized = '${escaped}' LIMIT 200`;
+  for (const c of await coql(customQ)) add(c as Record<string, unknown>, "Contact");
 
-  // Fall back to Leads
-  const leadQuery = `
-    SELECT id, Full_Name, Email, Phone, Mobile, Lead_Source,
-           Owner, Created_Time, Modified_Time, Data_Source
-    FROM Leads
-    WHERE Phone = '${escaped}' OR Mobile = '${escaped}'
-       OR Phone = '${escaped164}' OR Mobile = '${escaped164}'
-    LIMIT 1
-  `;
-  const leads = await coql(leadQuery.trim());
-  if (leads.length > 0) {
-    const l = leads[0] as Record<string, unknown>;
-    return mapContact(l, "Lead");
-  }
+  // Leads
+  const leadQ = `SELECT id, Full_Name, Email, Phone, Mobile, Lead_Source, Owner, Created_Time, Modified_Time, Data_Source FROM Leads WHERE Phone = '${escaped}' OR Mobile = '${escaped}' OR Phone = '${escaped164}' OR Mobile = '${escaped164}' LIMIT 200`;
+  for (const l of await coql(leadQ)) add(l as Record<string, unknown>, "Lead");
 
-  return null;
+  return all;
+}
+
+export async function findContactByPhone(phone: string): Promise<ContactRecord | null> {
+  const all = await findAllContactsByPhone(phone);
+  return all[0] ?? null;
 }
 
 function mapContact(c: Record<string, unknown>, type: "Contact" | "Lead"): ContactRecord {
@@ -237,27 +227,28 @@ export interface NoteRecord {
   parentId?: string;
 }
 
-export async function getNotes(contactId: string): Promise<NoteRecord[]> {
-  const query = `
-    SELECT id, Note_Title, Note_Content, Created_Time, Modified_Time, Owner
-    FROM Notes
-    WHERE Parent_Id = '${contactId}'
-    ORDER BY Created_Time DESC
-    LIMIT 100
-  `;
-  const rows = await coql(query.trim());
-  return rows.map((r) => {
-    const n = r as Record<string, unknown>;
-    const owner = n.Owner as Record<string, unknown> | null;
-    return {
-      id: n.id as string,
-      title: (n.Note_Title as string) ?? "",
-      content: (n.Note_Content as string) ?? "",
-      createdTime: n.Created_Time as string,
-      modifiedTime: (n.Modified_Time as string) ?? undefined,
-      owner: owner ? (owner.name as string) ?? undefined : undefined,
-    };
-  });
+export async function getNotes(contactIds: string[]): Promise<NoteRecord[]> {
+  const seen = new Set<string>();
+  const all: NoteRecord[] = [];
+  // Fan out per ID — COQL polymorphic Parent_Id doesn't reliably support `in`
+  await Promise.all(contactIds.map(async (contactId) => {
+    const query = `SELECT id, Note_Title, Note_Content, Created_Time, Modified_Time, Owner FROM Notes WHERE Parent_Id = '${contactId}' ORDER BY Created_Time DESC LIMIT 100`;
+    for (const r of await coql(query)) {
+      const n = r as Record<string, unknown>;
+      if (seen.has(n.id as string)) continue;
+      seen.add(n.id as string);
+      const owner = n.Owner as Record<string, unknown> | null;
+      all.push({
+        id: n.id as string,
+        title: (n.Note_Title as string) ?? "",
+        content: (n.Note_Content as string) ?? "",
+        createdTime: n.Created_Time as string,
+        modifiedTime: (n.Modified_Time as string) ?? undefined,
+        owner: owner ? (owner.name as string) ?? undefined : undefined,
+      });
+    }
+  }));
+  return all.sort((a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime());
 }
 
 // ─── SMS ─────────────────────────────────────────────────────────────────────
@@ -274,9 +265,9 @@ export interface SmsRecord {
   media?: string[];
 }
 
-export async function getSmsHistory(contactId: string, phone: string): Promise<SmsRecord[]> {
-  const results: SmsRecord[] = [];
+export async function getSmsHistory(contactIds: string[], phone: string): Promise<SmsRecord[]> {
   const seenIds = new Set<string>();
+  const results: SmsRecord[] = [];
 
   function pushHelloSend(row: Record<string, unknown>) {
     if (seenIds.has(row.id as string)) return;
@@ -299,34 +290,37 @@ export async function getSmsHistory(contactId: string, phone: string): Promise<S
     });
   }
 
-  // ── Module 1a: HelloSend by Contact_Lookup (linked records) ─────────────────
-  const q1 = `SELECT id, ringcentralbulksmsextensionforzohocrm__From_Number, ringcentralbulksmsextensionforzohocrm__To, ringcentralbulksmsextensionforzohocrm__SMS, ringcentralbulksmsextensionforzohocrm__SMS_Type, ringcentralbulksmsextensionforzohocrm__SMS_Sent_Via, ringcentralbulksmsextensionforzohocrm__Channel, ringcentralbulksmsextensionforzohocrm__Media_1, ringcentralbulksmsextensionforzohocrm__Media_2, ringcentralbulksmsextensionforzohocrm__Media_3, Created_Time FROM ringcentralbulksmsextensionforzohocrm__RingCentral_SMS_History WHERE ringcentralbulksmsextensionforzohocrm__Contact_Lookup = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
-  for (const r of await coql(q1)) pushHelloSend(r as Record<string, unknown>);
+  // ── Module 1a: HelloSend by Contact_Lookup — fan out across all contact IDs ──
+  await Promise.all(contactIds.map(async (contactId) => {
+    const q = `SELECT id, ringcentralbulksmsextensionforzohocrm__From_Number, ringcentralbulksmsextensionforzohocrm__To, ringcentralbulksmsextensionforzohocrm__SMS, ringcentralbulksmsextensionforzohocrm__SMS_Type, ringcentralbulksmsextensionforzohocrm__SMS_Sent_Via, ringcentralbulksmsextensionforzohocrm__Channel, ringcentralbulksmsextensionforzohocrm__Media_1, ringcentralbulksmsextensionforzohocrm__Media_2, ringcentralbulksmsextensionforzohocrm__Media_3, Created_Time FROM ringcentralbulksmsextensionforzohocrm__RingCentral_SMS_History WHERE ringcentralbulksmsextensionforzohocrm__Contact_Lookup = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
+    for (const r of await coql(q)) pushHelloSend(r as Record<string, unknown>);
+  }));
 
-  // ── Module 1b: HelloSend by To phone — catches records not linked to contact ─
-  // COQL WHERE on the To field is unsupported; REST search works with E.164 format
+  // ── Module 1b: HelloSend by To phone — catches records not linked to any contact
   const e164 = `+1${phone}`;
   for (const r of await zohoSearch(
     "ringcentralbulksmsextensionforzohocrm__RingCentral_SMS_History",
     `(ringcentralbulksmsextensionforzohocrm__To:equals:${e164})`
   )) pushHelloSend(r as Record<string, unknown>);
 
-  // ── Module 2: RingCentral ABR Extension SMS ──────────────────────────────────
-  const q2 = `SELECT id, ringcentralextensionabr__From_Number, ringcentralextensionabr__To_Number, ringcentralextensionabr__Message, ringcentralextensionabr__Message_Source, ringcentralextensionabr__Has_Attachment, ringcentralextensionabr__Contact, Created_Time FROM ringcentralextensionabr__RingCentral_SMS_History WHERE ringcentralextensionabr__Contact = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
-  for (const r of await coql(q2)) {
-    const row = r as Record<string, unknown>;
-    if (seenIds.has(row.id as string)) continue;
-    seenIds.add(row.id as string);
-    results.push({
-      id: row.id as string,
-      fromNumber: (row.ringcentralextensionabr__From_Number as string) ?? "",
-      toNumber: (row.ringcentralextensionabr__To_Number as string) ?? "",
-      message: (row.ringcentralextensionabr__Message as string) ?? "",
-      messageType: "SMS",
-      channel: (row.ringcentralextensionabr__Message_Source as string) ?? "RingCentral",
-      createdTime: row.Created_Time as string,
-    });
-  }
+  // ── Module 2: RingCentral ABR Extension SMS — fan out across all contact IDs ─
+  await Promise.all(contactIds.map(async (contactId) => {
+    const q = `SELECT id, ringcentralextensionabr__From_Number, ringcentralextensionabr__To_Number, ringcentralextensionabr__Message, ringcentralextensionabr__Message_Source, ringcentralextensionabr__Has_Attachment, ringcentralextensionabr__Contact, Created_Time FROM ringcentralextensionabr__RingCentral_SMS_History WHERE ringcentralextensionabr__Contact = '${contactId}' ORDER BY Created_Time DESC LIMIT 200`;
+    for (const r of await coql(q)) {
+      const row = r as Record<string, unknown>;
+      if (seenIds.has(row.id as string)) return;
+      seenIds.add(row.id as string);
+      results.push({
+        id: row.id as string,
+        fromNumber: (row.ringcentralextensionabr__From_Number as string) ?? "",
+        toNumber: (row.ringcentralextensionabr__To_Number as string) ?? "",
+        message: (row.ringcentralextensionabr__Message as string) ?? "",
+        messageType: "SMS",
+        channel: (row.ringcentralextensionabr__Message_Source as string) ?? "RingCentral",
+        createdTime: row.Created_Time as string,
+      });
+    }
+  }));
 
   return results.sort((a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime());
 }
@@ -352,43 +346,44 @@ export interface CallRecord {
 }
 
 // From_Number__s and To_Number__s are not accessible via COQL with current OAuth scopes
-export async function getCallHistory(contactId: string, phone: string): Promise<CallRecord[]> {
+export async function getCallHistory(contactIds: string[], phone: string): Promise<CallRecord[]> {
   void phone;
-  const results: CallRecord[] = [];
   const seenIds = new Set<string>();
+  const results: CallRecord[] = [];
 
-  // Exclude Overdue (scheduled, never placed) — != 'Overdue' also returns null-status rows (inbound/missed)
-  const qContact = `SELECT id, Subject, Call_Type, Call_Purpose, Call_Result, Call_Start_Time, Call_Duration, Call_Duration_in_seconds, Description, Who_Id, Dialled_Number, Caller_ID, Outgoing_Call_Status, Call_Summary, RingCentral_Call_ID FROM Calls WHERE Who_Id = '${contactId}' AND Outgoing_Call_Status != 'Overdue' ORDER BY Call_Start_Time DESC LIMIT 200`;
-
-  for (const r of await coql(qContact)) {
-    const row = r as Record<string, unknown>;
-    if (seenIds.has(row.id as string)) continue;
-    // Skip calls with no logged duration or too short to be real
-    if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) continue;
-    if ((row.Call_Duration_in_seconds as number) <= 5) continue;
-    // Skip automation-generated follow-up calls (subject contains Follow/FollowUp/FU)
-    const subjectRaw = (row.Subject as string) ?? "";
-    if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subjectRaw)) continue;
-    seenIds.add(row.id as string);
-    const whoId = row.Who_Id as Record<string, unknown> | null;
-    results.push({
-      id: row.id as string,
-      subject: (row.Subject as string) ?? "",
-      callType: (row.Call_Type as string) ?? "",
-      callPurpose: (row.Call_Purpose as string) ?? undefined,
-      callResult: (row.Call_Result as string) ?? undefined,
-      startTime: (row.Call_Start_Time as string) ?? "",
-      durationSeconds: (row.Call_Duration_in_seconds as number) ?? undefined,
-      duration: (row.Call_Duration as string) ?? undefined,
-      description: (row.Description as string) ?? undefined,
-      contactName: whoId ? (whoId.name as string) : undefined,
-      dialledNumber: (row.Dialled_Number as string) ?? undefined,
-      callerId: (row.Caller_ID as string) ?? undefined,
-      outgoingStatus: (row.Outgoing_Call_Status as string) ?? undefined,
-      summary: (row.Call_Summary as string) ?? undefined,
-      ringcentralCallId: (row.RingCentral_Call_ID as string) ?? undefined,
-    });
-  }
+  // Fan out across all contact IDs — Who_Id is polymorphic, parallel queries are safer than `in`
+  await Promise.all(contactIds.map(async (contactId) => {
+    const q = `SELECT id, Subject, Call_Type, Call_Purpose, Call_Result, Call_Start_Time, Call_Duration, Call_Duration_in_seconds, Description, Who_Id, Dialled_Number, Caller_ID, Outgoing_Call_Status, Call_Summary, RingCentral_Call_ID FROM Calls WHERE Who_Id = '${contactId}' AND Outgoing_Call_Status != 'Overdue' ORDER BY Call_Start_Time DESC LIMIT 200`;
+    for (const r of await coql(q)) {
+      const row = r as Record<string, unknown>;
+      if (seenIds.has(row.id as string)) return;
+      // Skip calls with no logged duration or too short to be real
+      if (row.Call_Duration_in_seconds === null || row.Call_Duration_in_seconds === undefined) return;
+      if ((row.Call_Duration_in_seconds as number) <= 5) return;
+      // Skip automation-generated follow-up calls
+      const subjectRaw = (row.Subject as string) ?? "";
+      if (/\b(followup|follow[\s-]*up|follow|FU)\b/i.test(subjectRaw)) return;
+      seenIds.add(row.id as string);
+      const whoId = row.Who_Id as Record<string, unknown> | null;
+      results.push({
+        id: row.id as string,
+        subject: (row.Subject as string) ?? "",
+        callType: (row.Call_Type as string) ?? "",
+        callPurpose: (row.Call_Purpose as string) ?? undefined,
+        callResult: (row.Call_Result as string) ?? undefined,
+        startTime: (row.Call_Start_Time as string) ?? "",
+        durationSeconds: (row.Call_Duration_in_seconds as number) ?? undefined,
+        duration: (row.Call_Duration as string) ?? undefined,
+        description: (row.Description as string) ?? undefined,
+        contactName: whoId ? (whoId.name as string) : undefined,
+        dialledNumber: (row.Dialled_Number as string) ?? undefined,
+        callerId: (row.Caller_ID as string) ?? undefined,
+        outgoingStatus: (row.Outgoing_Call_Status as string) ?? undefined,
+        summary: (row.Call_Summary as string) ?? undefined,
+        ringcentralCallId: (row.RingCentral_Call_ID as string) ?? undefined,
+      });
+    }
+  }));
 
   return results.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 }
@@ -406,28 +401,28 @@ export interface DealRecord {
   accountName?: string;
 }
 
-export async function getDeals(contactId: string): Promise<DealRecord[]> {
-  const query = `
-    SELECT id, Deal_Name, Stage, Amount, Closing_Date, Created_Time, Owner
-    FROM Deals
-    WHERE Contact_Name = '${contactId}'
-    ORDER BY Created_Time DESC
-    LIMIT 100
-  `;
-  const rows = await coql(query.trim());
-  return rows.map((r) => {
-    const d = r as Record<string, unknown>;
-    const owner = d.Owner as Record<string, unknown> | null;
-    return {
-      id: d.id as string,
-      dealName: (d.Deal_Name as string) ?? "",
-      stage: (d.Stage as string) ?? "",
-      amount: (d.Amount as number) ?? undefined,
-      closingDate: (d.Closing_Date as string) ?? undefined,
-      createdTime: d.Created_Time as string,
-      owner: owner ? (owner.name as string) ?? undefined : undefined,
-    };
-  });
+export async function getDeals(contactIds: string[]): Promise<DealRecord[]> {
+  const seen = new Set<string>();
+  const all: DealRecord[] = [];
+  await Promise.all(contactIds.map(async (contactId) => {
+    const q = `SELECT id, Deal_Name, Stage, Amount, Closing_Date, Created_Time, Owner FROM Deals WHERE Contact_Name = '${contactId}' ORDER BY Created_Time DESC LIMIT 100`;
+    for (const r of await coql(q)) {
+      const d = r as Record<string, unknown>;
+      if (seen.has(d.id as string)) return;
+      seen.add(d.id as string);
+      const owner = d.Owner as Record<string, unknown> | null;
+      all.push({
+        id: d.id as string,
+        dealName: (d.Deal_Name as string) ?? "",
+        stage: (d.Stage as string) ?? "",
+        amount: (d.Amount as number) ?? undefined,
+        closingDate: (d.Closing_Date as string) ?? undefined,
+        createdTime: d.Created_Time as string,
+        owner: owner ? (owner.name as string) ?? undefined : undefined,
+      });
+    }
+  }));
+  return all.sort((a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime());
 }
 
 // ─── Account info ─────────────────────────────────────────────────────────────

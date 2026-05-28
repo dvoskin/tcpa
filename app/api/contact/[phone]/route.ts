@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  findContactByPhone,
+  findAllContactsByPhone,
   getNotes,
   getSmsHistory,
   getCallHistory,
@@ -19,30 +19,36 @@ export async function GET(
   const normalized = normalizePhone(decodeURIComponent(phone));
 
   try {
-    const [contact, formSubmissions] = await Promise.all([
-      findContactByPhone(normalized),
+    const [allContacts, formSubmissions] = await Promise.all([
+      findAllContactsByPhone(normalized),
       Promise.resolve(getWebformSubmissions(normalized)),
     ]);
 
+    // Primary contact for display — first result from REST search (most relevant)
+    const contact = allContacts[0] ?? null;
+
     if (!contact) {
-      return NextResponse.json({ contact: null, sms: [], calls: [], notes: [], deals: [], webform: null, formSubmissions });
+      return NextResponse.json({ contact: null, allContacts: [], sms: [], calls: [], notes: [], deals: [], webform: null, formSubmissions });
     }
 
+    // Aggregate data across ALL matching contact IDs so duplicates don't hide activity
+    const contactIds = allContacts.map((c) => c.id);
+    const primaryId = contact.id;
+
     const [zohoSms, stSms, calls, notes, deals, webform] = await Promise.all([
-      getSmsHistory(contact.id, normalized),
+      getSmsHistory(contactIds, normalized),
       getSimpleTextingMessages(normalized),
-      getCallHistory(contact.id, normalized),
-      contact.type === "Contact" ? getNotes(contact.id) : Promise.resolve([]),
-      contact.type === "Contact" ? getDeals(contact.id) : Promise.resolve([]),
-      contact.type === "Contact" ? getWebformData(contact.id) : Promise.resolve(null),
+      getCallHistory(contactIds, normalized),
+      contact.type === "Contact" ? getNotes(contactIds) : Promise.resolve([]),
+      contact.type === "Contact" ? getDeals(contactIds) : Promise.resolve([]),
+      contact.type === "Contact" ? getWebformData(primaryId) : Promise.resolve(null),
     ]);
 
-    // Merge and sort all SMS sources newest-first
     const sms = [...zohoSms, ...stSms].sort(
       (a, b) => new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime()
     );
 
-    return NextResponse.json({ contact, sms, calls, notes, deals, webform, formSubmissions });
+    return NextResponse.json({ contact, allContacts, sms, calls, notes, deals, webform, formSubmissions });
   } catch (err) {
     const e = err as Error;
     console.error("contact lookup failed", e.message, e.cause ?? "");

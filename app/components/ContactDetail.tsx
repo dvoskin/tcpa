@@ -46,6 +46,7 @@ interface FormSubmission {
 
 interface ApiResponse {
   contact: ContactRecord | null;
+  allContacts: ContactRecord[];
   sms: SmsRecord[];
   calls: CallRecord[];
   notes: NoteRecord[];
@@ -177,7 +178,7 @@ export default function ContactDetail({ phone }: { phone: string }) {
     </div>
   );
 
-  const { contact, sms = [], calls = [], notes = [], deals = [], webform, formSubmissions = [] } = data;
+  const { contact, allContacts = [], sms = [], calls = [], notes = [], deals = [], webform, formSubmissions = [] } = data;
 
   if (!contact) return (
     <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2 p-6">
@@ -352,6 +353,20 @@ export default function ContactDetail({ phone }: { phone: string }) {
       <div className="flex-1 overflow-y-auto p-6">
         {activeTab === "overview" && (
           <div className="space-y-6">
+            {allContacts.length > 1 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <p className="text-xs font-semibold text-amber-700 mb-1">
+                  {allContacts.length} duplicate records merged for this number
+                </p>
+                <div className="flex flex-col gap-0.5">
+                  {allContacts.map((c) => (
+                    <span key={c.id} className="text-xs text-amber-600">
+                      {c.fullName || "—"} · {c.type} · {c.owner || "no owner"}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             <Section title="Contact Details">
               <Row label="Full Name" value={contact.fullName} />
               <Row label="Email" value={contact.email} />
