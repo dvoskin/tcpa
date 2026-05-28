@@ -450,14 +450,14 @@ export default function ContactDetail({ phone }: { phone: string }) {
         {activeTab === "sms" && (
           <div className="space-y-2">
             {sms.length === 0 && <Empty text="No SMS messages found" />}
-            {sms.map((s) => <SmsCard key={s.id} sms={s} phone={phone} leadSource={contact.leadSource} />)}
+            {sms.map((s) => <SmsCard key={s.id} sms={s} phone={phone} />)}
           </div>
         )}
 
         {activeTab === "calls" && (
           <div className="space-y-2">
             {calls.length === 0 && <Empty text="No call records found" />}
-            {calls.map((c) => <CallCard key={c.id} call={c} leadSource={contact.leadSource} />)}
+            {calls.map((c) => <CallCard key={c.id} call={c} />)}
           </div>
         )}
 
@@ -465,7 +465,7 @@ export default function ContactDetail({ phone }: { phone: string }) {
         {activeTab === "deals" && (
           <div className="space-y-2">
             {deals.length === 0 && <Empty text="No transactions on record" />}
-            {deals.map((d) => <DealCard key={d.id} deal={d} leadSource={contact.leadSource} />)}
+            {deals.map((d) => <DealCard key={d.id} deal={d} />)}
           </div>
         )}
 
@@ -524,7 +524,7 @@ function TimelineCard({ item }: { item: TLItem }) {
   );
 }
 
-function SmsCard({ sms, phone, leadSource }: { sms: SmsRecord; phone: string; leadSource?: string }) {
+function SmsCard({ sms, phone }: { sms: SmsRecord; phone: string }) {
   // Use explicit directionType (SimpleTexting) or fall back to phone matching (Zoho)
   const isInbound = sms.directionType
     ? sms.directionType === "MO"
@@ -541,9 +541,6 @@ function SmsCard({ sms, phone, leadSource }: { sms: SmsRecord; phone: string; le
           {sms.messageType && <Badge label={sms.messageType} color="gray" />}
           {sms.channel && <Badge label={sms.channel} color={isST ? "purple" : "gray"} />}
           {isST && sms.referenceType === "CMP" && <Badge label="Campaign" color="purple" />}
-          {leadSource && (
-            <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{leadSource}</span>
-          )}
         </div>
         <span className="text-xs text-gray-400">{fmtDate(sms.createdTime)}</span>
       </div>
@@ -556,7 +553,7 @@ function SmsCard({ sms, phone, leadSource }: { sms: SmsRecord; phone: string; le
   );
 }
 
-function CallCard({ call, leadSource }: { call: CallRecord; leadSource?: string }) {
+function CallCard({ call }: { call: CallRecord }) {
   const typeColor = call.callType === "Inbound" ? "green" : "blue";
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-3">
@@ -565,9 +562,6 @@ function CallCard({ call, leadSource }: { call: CallRecord; leadSource?: string 
           <Badge label={call.callType || "Call"} color={typeColor} />
           {call.callResult && <Badge label={call.callResult} color="gray" />}
           {call.callPurpose && <Badge label={call.callPurpose} color="purple" />}
-          {leadSource && (
-            <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{leadSource}</span>
-          )}
         </div>
         <span className="text-xs text-gray-400 shrink-0 ml-2">{fmtDate(call.startTime)}</span>
       </div>
@@ -599,7 +593,7 @@ function NoteCard({ note }: { note: NoteRecord }) {
   );
 }
 
-function DealCard({ deal, leadSource }: { deal: DealRecord; leadSource?: string }) {
+function DealCard({ deal }: { deal: DealRecord }) {
   const stageColors: Record<string, string> = {
     "Closed Won": "green", "Closed Lost": "red",
     "Proposal": "blue", "Negotiation": "amber",
@@ -612,12 +606,7 @@ function DealCard({ deal, leadSource }: { deal: DealRecord; leadSource?: string 
           <p className="text-sm font-medium text-gray-800">{deal.dealName}</p>
           {deal.accountName && <p className="text-xs text-gray-500">{deal.accountName}</p>}
         </div>
-        <div className="flex items-center gap-2">
-          {leadSource && (
-            <span className="text-xs font-medium text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">{leadSource}</span>
-          )}
-          <Badge label={deal.stage} color={color} />
-        </div>
+        <Badge label={deal.stage} color={color} />
       </div>
       <div className="flex gap-4 mt-1">
         {deal.amount != null && (
