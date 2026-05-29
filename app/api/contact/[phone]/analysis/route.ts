@@ -12,7 +12,6 @@ import {
 import { getWebformSubmissions } from "@/lib/webforms";
 import { getSimpleTextingMessages } from "@/lib/simpletexting";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 function fmt(phone: string) {
   return phone.length === 10
@@ -31,6 +30,11 @@ export async function GET(
 ) {
   const { phone } = await params;
   const normalized = normalizePhone(decodeURIComponent(phone));
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json({ error: "ANTHROPIC_API_KEY is not configured. Add it to your Render environment variables." }, { status: 500 });
+  }
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   try {
     // Fetch all data — same fan-out as main contact route
