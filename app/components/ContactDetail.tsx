@@ -140,19 +140,24 @@ function LeadSourceRow({ value }: { value?: string }) {
   );
 }
 
-type Tab = "overview" | "sms" | "calls" | "deals" | "webform" | "timeline";
+type Tab = "overview" | "sms" | "calls" | "deals" | "webform" | "timeline" | "analysis";
 
 export default function ContactDetail({ phone }: { phone: string }) {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [error, setError] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisMeta, setAnalysisMeta] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (!phone) return;
     setLoading(true);
     setError(null);
     setData(null);
+    setAnalysis(null);
+    setAnalysisMeta(null);
     fetch(`/api/contact/${encodeURIComponent(phone)}`)
       .then((r) => r.json())
       .then((d: ApiResponse) => { setData(d); setActiveTab("overview"); })
@@ -218,6 +223,7 @@ export default function ContactDetail({ phone }: { phone: string }) {
     { id: "deals", label: "Transactions", count: deals.length },
     { id: "webform", label: "Webform / Consent", count: totalWebEntries > 0 ? totalWebEntries : undefined },
     { id: "timeline", label: "Timeline", count: sms.length + calls.length + notes.length },
+    { id: "analysis", label: "AI Analysis" },
   ];
 
   // Build merged timeline
@@ -471,6 +477,29 @@ export default function ContactDetail({ phone }: { phone: string }) {
 
         {activeTab === "webform" && (
           <WebformPanel webform={webform} contact={contact} formSubmissions={formSubmissions} salesIQChats={salesIQChats} />
+        )}
+
+        {activeTab === "analysis" && (
+          <AnalysisPanel
+            phone={phone}
+            analysis={analysis}
+            loading={analysisLoading}
+            meta={analysisMeta}
+            onGenerate={async () => {
+              setAnalysisLoading(true);
+              try {
+                const res = await fetch(`/api/contact/${encodeURIComponent(phone)}/analysis`);
+                const d = await res.json();
+                if (d.error) throw new Error(d.error);
+                setAnalysis(d.analysis);
+                setAnalysisMeta(d.meta);
+              } catch (e) {
+                setAnalysis(`Error: ${(e as Error).message}`);
+              } finally {
+                setAnalysisLoading(false);
+              }
+            }}
+          />
         )}
       </div>
     </div>
@@ -764,6 +793,126 @@ function FormSubmissionCard({ sub }: { sub: FormSubmission }) {
       {sub.consentChecked && (
         <p className="mt-1 text-xs text-green-600 font-medium">✓ Consent checkbox checked</p>
       )}
+    </div>
+  );
+}
+
+function AnalysisPanel({
+  phone, analysis, loading, meta, onGenerate,
+}: {
+  phone: string;
+  analysis: string | null;
+  loading: boolean;
+  meta: Record<string, unknown> | null;
+  onGenerate: () => void;
+}) {
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full" />
+        <p className="text-sm text-gray-500">Analyzing full contact history…</p>
+        <p className="text-xs text-gray-400">This may take 10–20 seconds</p>
+      </div>
+    );
+  }
+
+  if (!analysis) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
+        <div className="text-5xl">🔍</div>
+        <div>
+          <p className="font-semibold text-gray-700 text-base">Forensic AI Analysis</p>
+          <p className="text-sm text-gray-500 mt-1 max-w-sm">
+            Synthesizes all calls, SMS, notes, deals, forms, and lead source data into a structured report for legal and compliance review.
+          </p>
+        </div>
+        <button
+          onClick={onGenerate}
+          className="mt-2 px-5 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+        >
+          Generate Analysis
+        </button>
+      </div>
+    );
+  }
+
+  // Render markdown-style sections from Claude's response
+  const sections = analysis.split(/\n(?=#{1,3} )/);
+
+  return (
+    <div className="space-y-4 max-w-3xl">
+      {meta && (
+        <div className="flex flex-wrap gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg px-4 py-2 border border-gray-200">
+          <span>📞 {meta.callCount as number} calls</span>
+          <span>💬 {meta.smsCount as number} SMS</span>
+          <span>📝 {meta.noteCount as number} notes</span>
+          <span>💼 {meta.dealCount as number} deals</span>
+          <span>📋 {meta.formCount as number} forms</span>
+          <span>👤 {meta.contactCount as number} CRM record{(meta.contactCount as number) !== 1 ? "s" : ""}</span>
+          <span className="ml-auto text-gray-400">Generated {new Date(meta.generatedAt as string).toLocaleString()}</span>
+        </div>
+      )}
+
+      {sections.map((section, i) => (
+        <AnalysisSection key={i} text={section} />
+      ))}
+
+      <div className="pt-4 border-t border-gray-200">
+        <button
+          onClick={onGenerate}
+          className="px-4 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+        >
+          Regenerate
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisSection({ text }: { text: string }) {
+  const lines = text.trim().split("\n");
+  const titleLine = lines[0];
+  const body = lines.slice(1).join("\n").trim();
+
+  const isHeading = /^#{1,3} /.test(titleLine);
+  const title = isHeading ? titleLine.replace(/^#{1,3} /, "") : null;
+
+  const renderBody = (content: string) => {
+    return content.split("\n").map((line, i) => {
+      // Bold (**text**)
+      const rendered = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      // Bullet points
+      if (/^[-*] /.test(line)) {
+        return (
+          <li key={i} className="text-sm text-gray-700 leading-relaxed ml-4 list-disc"
+            dangerouslySetInnerHTML={{ __html: rendered.replace(/^[-*] /, "") }} />
+        );
+      }
+      if (line.trim() === "") return <div key={i} className="h-1" />;
+      return (
+        <p key={i} className="text-sm text-gray-700 leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: rendered }} />
+      );
+    });
+  };
+
+  // Flag/compliance sections get red accent
+  const isFlag = /flag|compli|risk|warning|caution|attorney|legal/i.test(title ?? text.slice(0, 60));
+  const borderColor = isFlag ? "border-red-300" : "border-gray-200";
+  const titleColor = isFlag ? "text-red-700" : "text-gray-800";
+
+  if (!title) {
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
+        <div className="space-y-1">{renderBody(text)}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`bg-white border rounded-lg px-4 py-3 ${borderColor}`}>
+      <h3 className={`text-sm font-semibold mb-2 ${titleColor}`}>{title}</h3>
+      <div className="space-y-1">{renderBody(body)}</div>
     </div>
   );
 }
